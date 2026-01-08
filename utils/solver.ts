@@ -11,7 +11,7 @@ interface Slot {
 }
 
 /**
- * 전역 배치의 총 점수를 계산합니다.
+ * 전역 배치의 총 점수를 계산합니다 (기본 점수 + 시너지).
  */
 const calculateGlobalScore = (
   slots: Slot[],
@@ -20,6 +20,10 @@ const calculateGlobalScore = (
   let total = 0;
   const processedEdges = new Set<string>();
 
+  // 1. 기본 점수 (배치된 영웅 수)
+  total += placements.size;
+
+  // 2. 시너지 점수
   slots.forEach(slot => {
     const heroA = placements.get(slot.key);
     if (!heroA) return;
@@ -41,7 +45,7 @@ const calculateGlobalScore = (
 };
 
 /**
- * 업그레이드된 최적화 알고리즘: Greedy + Local Search (Swapping)
+ * 최적화 알고리즘: Greedy Seed + Iterative Swap
  */
 export const optimizeAllPlacements = (
   ownedHeroes: Hero[],
@@ -50,7 +54,6 @@ export const optimizeAllPlacements = (
 ): Record<string, number> => {
   if (ownedHeroes.length === 0) return {};
 
-  // 1. 모든 슬롯 데이터 평탄화
   const allSlots: Slot[] = [];
   puzzles.forEach(p => {
     p.nodes.forEach(n => {
@@ -68,18 +71,14 @@ export const optimizeAllPlacements = (
     });
   });
 
-  // 2. 초기 Greedy 배치
   const currentPlacements = new Map<string, Hero>();
   const availableHeroes = [...ownedHeroes];
-  
-  // 연결도(Degree)가 높은 순서대로 슬롯 정렬
   const sortedSlots = [...allSlots].sort((a, b) => b.edges.length - a.edges.length);
 
   sortedSlots.forEach(slot => {
     let bestHeroIdx = -1;
     let maxGain = -1;
 
-    // 후보군 필터링 (클래스 만족 여부)
     const candidates = availableHeroes.map((h, i) => ({ h, i }))
       .filter(item => (activeClassesMap[item.h.id] || []).includes(slot.requiredClass));
 
@@ -91,11 +90,11 @@ export const optimizeAllPlacements = (
         if (nHero) gain += calculateEdgeScore(h, nHero);
       });
 
-      // 점수가 높거나, 점수가 같으면 클래스 보유수가 적은(희귀한) 영웅 우선
       if (gain > maxGain) {
         maxGain = gain;
         bestHeroIdx = i;
       } else if (gain === maxGain && maxGain !== -1) {
+        // 동률일 경우 진영이 많은 영웅을 아끼기 위해 클래스가 적은 영웅 우선 사용
         if (h.classes.length < availableHeroes[bestHeroIdx].classes.length) {
           bestHeroIdx = i;
         }
@@ -108,15 +107,13 @@ export const optimizeAllPlacements = (
     }
   });
 
-  // 3. 반복적 지역 탐색 (Hill Climbing / Swapping)
-  // 최대 20회 루프 또는 점수 변화가 없을 때까지 수행
   let improved = true;
   let iterations = 0;
-  while (improved && iterations < 20) {
+  while (improved && iterations < 30) {
     improved = false;
     iterations++;
 
-    // A. 배치된 영웅들 간의 스왑 시도
+    // 스왑 최적화
     for (let i = 0; i < allSlots.length; i++) {
       for (let j = i + 1; j < allSlots.length; j++) {
         const slotA = allSlots[i];
@@ -126,23 +123,17 @@ export const optimizeAllPlacements = (
 
         if (!heroA || !heroB || heroA.id === heroB.id) continue;
 
-        // 서로의 클래스 요구사항을 만족하는지 확인
-        const aFitsB = (activeClassesMap[heroA.id] || []).includes(slotB.requiredClass);
-        const bFitsA = (activeClassesMap[heroB.id] || []).includes(slotA.requiredClass);
-
-        if (aFitsB && bFitsA) {
-          const scoreBefore = calculateGlobalScore(allSlots, currentPlacements);
+        if ((activeClassesMap[heroA.id] || []).includes(slotB.requiredClass) && 
+            (activeClassesMap[heroB.id] || []).includes(slotA.requiredClass)) {
           
-          // 임시 스왑
+          const scoreBefore = calculateGlobalScore(allSlots, currentPlacements);
           currentPlacements.set(slotA.key, heroB);
           currentPlacements.set(slotB.key, heroA);
-          
           const scoreAfter = calculateGlobalScore(allSlots, currentPlacements);
           
           if (scoreAfter > scoreBefore) {
             improved = true;
           } else {
-            // 원복
             currentPlacements.set(slotA.key, heroA);
             currentPlacements.set(slotB.key, heroB);
           }
@@ -150,38 +141,32 @@ export const optimizeAllPlacements = (
       }
     }
 
-    // B. 배치된 영웅과 대기 중인 영웅 간의 교체 시도
+    // 대기 영웅 교체 최적화
     for (let i = 0; i < allSlots.length; i++) {
       const slot = allSlots[i];
       const currentHero = currentPlacements.get(slot.key);
 
       for (let j = 0; j < availableHeroes.length; j++) {
         const poolHero = availableHeroes[j];
-        
-        // 클래스 만족 확인
         if ((activeClassesMap[poolHero.id] || []).includes(slot.requiredClass)) {
           const scoreBefore = calculateGlobalScore(allSlots, currentPlacements);
-          
-          // 임시 교체
           currentPlacements.set(slot.key, poolHero);
-          
           const scoreAfter = calculateGlobalScore(allSlots, currentPlacements);
           
           if (scoreAfter > scoreBefore) {
-            // 교체 확정 및 대기열 업데이트
-            availableHeroes[j] = currentHero!;
+            if (currentHero) availableHeroes[j] = currentHero;
+            else availableHeroes.splice(j, 1);
             improved = true;
-            break; // 다음 슬롯으로
+            break;
           } else {
-            // 원복
-            currentPlacements.set(slot.key, currentHero!);
+            if (currentHero) currentPlacements.set(slot.key, currentHero);
+            else currentPlacements.delete(slot.key);
           }
         }
       }
     }
   }
 
-  // 4. 최종 결과 포맷팅
   const result: Record<string, number> = {};
   currentPlacements.forEach((hero, key) => {
     result[key] = hero.id;

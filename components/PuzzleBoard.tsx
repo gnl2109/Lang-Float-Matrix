@@ -35,6 +35,7 @@ const PuzzleBoard: React.FC<PuzzleBoardProps> = ({
   }, [definition.type]);
 
   const filterId = `glow-filter-${safeType}-${mini ? 'mini' : 'main'}`;
+  const strongGlowId = `strong-glow-${safeType}-${mini ? 'mini' : 'main'}`;
 
   const updatePositions = () => {
     if (!containerRef.current) return;
@@ -122,6 +123,14 @@ const PuzzleBoard: React.FC<PuzzleBoardProps> = ({
               <feMergeNode in="SourceGraphic"/>
             </feMerge>
           </filter>
+          <filter id={strongGlowId} x="-50%" y="-50%" width="200%" height="200%" filterUnits="userSpaceOnUse">
+            <feGaussianBlur stdDeviation={mini ? "2" : "6"} result="coloredBlur"/>
+            <feMerge>
+              <feMergeNode in="coloredBlur"/>
+              <feMergeNode in="coloredBlur"/>
+              <feMergeNode in="SourceGraphic"/>
+            </feMerge>
+          </filter>
         </defs>
         {definition.edges.map(([a, b], i) => {
           const posA = nodePositions[a];
@@ -150,12 +159,16 @@ const PuzzleBoard: React.FC<PuzzleBoardProps> = ({
               strokeColor = '#f1f5f9';
               strokeWidth = mini ? 1.2 : 2;
             } else if (score === 1) {
-              strokeColor = '#0ea5e9';
+              strokeColor = '#0ea5e9'; // Light Blue
               strokeWidth = mini ? 2 : 4;
             } else if (score === 2) {
-              strokeColor = '#38bdf8';
+              strokeColor = '#38bdf8'; // Sky Blue
               strokeWidth = mini ? 3.5 : 8;
               filter = `url(#${filterId})`;
+            } else if (score >= 3) {
+              strokeColor = '#2563eb'; // Royal Blue (굵은 파란색)
+              strokeWidth = mini ? 5 : 14;
+              filter = `url(#${strongGlowId})`;
             }
           }
 
@@ -174,7 +187,7 @@ const PuzzleBoard: React.FC<PuzzleBoardProps> = ({
         })}
       </svg>
 
-      {(['top', 'mid', 'bot'] as const).map(rowKey => (
+      {(['top', 'mid', 'bot'] as const).map(rowKey => (rowKey in rows && rows[rowKey].length > 0) && (
         <div key={rowKey} className={`flex justify-center z-10 transition-all ${getRowGap(rowKey)}`}>
           {rows[rowKey].map(node => {
             const placedHero = placements[node.id];
@@ -208,7 +221,7 @@ const PuzzleBoard: React.FC<PuzzleBoardProps> = ({
                     <div className="text-amber-500 font-black text-[10px] md:text-sm leading-tight truncate px-1">{placedHero.name}</div>
                     <div className="flex gap-0.5 mt-1 justify-center">
                       {placedHero.factions.map((_, i) => (
-                        <div key={i} className="w-1 md:w-1.5 h-1 md:h-1.5 rounded-full bg-slate-500/50" />
+                        <div key={i} className="w-1 md:w-1.5 h-1 md:h-1.5 rounded-full bg-amber-500" />
                       ))}
                     </div>
                   </div>
