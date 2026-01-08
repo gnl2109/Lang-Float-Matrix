@@ -194,7 +194,7 @@ export const HERO_DATABASE: Hero[] = [
   { id: 190, name: '롤랑', factions: [Faction.PROTAGONIST, Faction.LEGION_OF_GLORY, Faction.YELESS_LEGENDS], classes: [HeroClass.MAGE, HeroClass.HOLY] },
   { id: 191, name: '프레시아', factions: [Faction.PROTAGONIST, Faction.PRINCESS_ALLIANCE, Faction.TRANSCENDENCE], classes: [HeroClass.HOLY, HeroClass.LANCER] },
   { id: 192, name: '리나', factions: [Faction.PROTAGONIST, Faction.DARK_REINCARNATION, Faction.TIME_AND_SPACE], classes: [HeroClass.MAGE, HeroClass.INFANTRY] },
-  { id: 193, name: '제르가디스', factions: [Faction.STRATEGIC_MASTERS, Faction.TRANSCENDENCE, Faction.TIME_AND_SPACE], classes: [HeroClass.MAGE, HeroClass.INFANTRY] },
+  { id: 193, name: '제르디가스', factions: [Faction.STRATEGIC_MASTERS, Faction.TRANSCENDENCE, Faction.TIME_AND_SPACE], classes: [HeroClass.MAGE, HeroClass.INFANTRY] },
   { id: 194, name: '가우리', factions: [Faction.PROTAGONIST, Faction.LEGION_OF_GLORY, Faction.TIME_AND_SPACE], classes: [HeroClass.INFANTRY] },
   { id: 195, name: '강신자', factions: [Faction.DARK_REINCARNATION, Faction.YELESS_LEGENDS, Faction.TRANSCENDENCE], classes: [HeroClass.DEMON, HeroClass.FLYER] },
   { id: 196, name: '캡틴잭', factions: [Faction.LEGION_OF_GLORY, Faction.METEOR_STRIKE, Faction.YELESS_LEGENDS], classes: [HeroClass.INFANTRY, HeroClass.AQUATIC] },
