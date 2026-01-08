@@ -1,0 +1,5 @@
+{
+  "name": "Langrisser Floating City Optimizer",
+  "description": "An advanced simulator and optimizer for the Langrisser Floating City Contract puzzle, helping players maximize rewards by calculating the best hero placements based on faction overlaps.",
+  "requestFramePermissions": []
+}
