@@ -6,7 +6,9 @@ import { calculateEdgeScore } from '../utils/scoring';
 interface PuzzleBoardProps {
   definition: PuzzleDefinition;
   placements: Record<string, Hero | undefined>;
+  pinnedKeys: Set<string>;
   onSocketClick: (nodeId: string) => void;
+  onTogglePin: (nodeId: string) => void;
   onDrop: (nodeId: string, heroId: number) => void;
   selectedHeroId: number | null;
   mini?: boolean;
@@ -15,7 +17,9 @@ interface PuzzleBoardProps {
 const PuzzleBoard: React.FC<PuzzleBoardProps> = ({ 
   definition, 
   placements, 
+  pinnedKeys,
   onSocketClick,
+  onTogglePin,
   onDrop,
   selectedHeroId,
   mini = false
@@ -193,58 +197,86 @@ const PuzzleBoard: React.FC<PuzzleBoardProps> = ({
             const placedHero = placements[node.id];
             const isTarget = dragOverNode === node.id;
             const socketId = `socket-${safeType}-${mini ? 'mini' : 'main'}-${node.id}`;
+            const key = `${definition.type}_${node.id}`;
+            const isPinned = pinnedKeys.has(key);
             
             return (
-              <button
-                key={node.id}
-                id={socketId}
-                onClick={mini ? undefined : () => onSocketClick(node.id)}
-                onDragOver={mini ? undefined : (e) => { e.preventDefault(); setDragOverNode(node.id); }}
-                onDragLeave={mini ? undefined : () => setDragOverNode(null)}
-                onDrop={mini ? undefined : (e) => {
-                  e.preventDefault();
-                  setDragOverNode(null);
-                  const hId = parseInt(e.dataTransfer.getData('heroId'));
-                  if (!isNaN(hId)) onDrop(node.id, hId);
-                }}
-                className={`transition-all flex flex-col items-center justify-center relative group
-                  ${mini ? 'w-6 h-6 rounded-lg border' : 'w-14 h-14 md:w-20 md:h-20 rounded-2xl md:rounded-3xl border-2'}
-                  ${placedHero 
-                    ? 'bg-slate-800 border-amber-500 shadow-lg shadow-amber-500/20' 
-                    : 'bg-slate-950/80 border-slate-800 border-dashed'}
-                  ${!mini && selectedHeroId && !placedHero ? 'ring-4 ring-amber-500/20 animate-pulse border-amber-500/50' : ''}
-                  ${!mini && isTarget ? 'scale-110 border-amber-400 bg-amber-500/10 ring-4 ring-amber-500/20 z-20 shadow-2xl' : ''}
-                `}
-              >
+              <div key={node.id} className="relative group">
+                <button
+                  id={socketId}
+                  onClick={mini ? undefined : () => onSocketClick(node.id)}
+                  onDragOver={mini ? undefined : (e) => { e.preventDefault(); setDragOverNode(node.id); }}
+                  onDragLeave={mini ? undefined : () => setDragOverNode(null)}
+                  onDrop={mini ? undefined : (e) => {
+                    e.preventDefault();
+                    setDragOverNode(null);
+                    const hId = parseInt(e.dataTransfer.getData('heroId'));
+                    if (!isNaN(hId)) onDrop(node.id, hId);
+                  }}
+                  className={`transition-all flex flex-col items-center justify-center relative
+                    ${mini ? 'w-6 h-6 rounded-lg border' : 'w-14 h-14 md:w-20 md:h-20 rounded-2xl md:rounded-3xl border-2'}
+                    ${placedHero 
+                      ? (isPinned ? 'bg-slate-800 border-amber-500 shadow-xl' : 'bg-slate-800 border-slate-600 shadow-md') 
+                      : 'bg-slate-950/80 border-slate-800 border-dashed'}
+                    ${!mini && selectedHeroId && !placedHero ? 'ring-4 ring-amber-500/20 animate-pulse border-amber-500/50' : ''}
+                    ${!mini && isTarget ? 'scale-110 border-amber-400 bg-amber-500/10 ring-4 ring-amber-500/20 z-20 shadow-2xl' : ''}
+                  `}
+                >
+                  {!mini && placedHero && (
+                    <div className="text-center scale-90 md:scale-100 pointer-events-none">
+                      <div className={`font-black text-[10px] md:text-sm leading-tight truncate px-1 ${isPinned ? 'text-amber-500' : 'text-slate-200'}`}>{placedHero.name}</div>
+                      <div className="flex gap-0.5 mt-1 justify-center">
+                        {placedHero.factions.map((_, i) => (
+                          <div key={i} className={`w-1 md:w-1.5 h-1 md:h-1.5 rounded-full ${isPinned ? 'bg-amber-500' : 'bg-slate-500'}`} />
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {!mini && !placedHero && (
+                    <>
+                      <div className="text-[9px] md:text-[11px] font-black text-slate-700 pointer-events-none mb-1">
+                        {node.requiredClass}
+                      </div>
+                      <span className="text-slate-800 group-hover:text-slate-600 transition-colors pointer-events-none">
+                        <svg className="w-4 h-4 md:w-6 md:h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 4v16m8-8H4" />
+                        </svg>
+                      </span>
+                    </>
+                  )}
+                  {mini && placedHero && (
+                    <div className={`w-full h-full rounded-sm ${isPinned ? 'bg-amber-500' : 'bg-slate-500'} relative`}>
+                      {isPinned && (
+                        <div className="absolute -top-1 -right-1 w-2 h-2 bg-amber-500 rounded-full border border-slate-950" />
+                      )}
+                    </div>
+                  )}
+                  {mini && !placedHero && (
+                    <div className="text-[6px] text-slate-700 font-bold">{node.requiredClass.charAt(0)}</div>
+                  )}
+                </button>
+
+                {/* Pin Button - 상세 보기에서 영웅이 있을 때만 표시 */}
                 {!mini && placedHero && (
-                  <div className="text-center scale-90 md:scale-100 pointer-events-none">
-                    <div className="text-amber-500 font-black text-[10px] md:text-sm leading-tight truncate px-1">{placedHero.name}</div>
-                    <div className="flex gap-0.5 mt-1 justify-center">
-                      {placedHero.factions.map((_, i) => (
-                        <div key={i} className="w-1 md:w-1.5 h-1 md:h-1.5 rounded-full bg-amber-500" />
-                      ))}
-                    </div>
-                  </div>
+                  <button 
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onTogglePin(node.id);
+                    }}
+                    title={isPinned ? "고정 해제" : "배치 고정"}
+                    className={`absolute -top-2 -right-2 w-7 h-7 rounded-full border shadow-xl flex items-center justify-center transition-all z-30
+                      ${isPinned 
+                        ? 'bg-amber-500 border-amber-400 text-slate-950 scale-110 opacity-100' 
+                        : 'bg-slate-900 border-slate-700 text-slate-500 opacity-40 hover:opacity-100 hover:scale-110 hover:border-slate-500'
+                      }
+                    `}
+                  >
+                    <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M16,12V4H17V2H7V4H8V12L6,14V16H11.2V22H12.8V16H18V14L16,12Z" />
+                    </svg>
+                  </button>
                 )}
-                {!mini && !placedHero && (
-                  <>
-                    <div className="text-[9px] md:text-[11px] font-black text-slate-700 pointer-events-none mb-1">
-                      {node.requiredClass}
-                    </div>
-                    <span className="text-slate-800 group-hover:text-slate-600 transition-colors pointer-events-none">
-                      <svg className="w-4 h-4 md:w-6 md:h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 4v16m8-8H4" />
-                      </svg>
-                    </span>
-                  </>
-                )}
-                {mini && placedHero && (
-                  <div className="w-full h-full bg-amber-500 rounded-sm" />
-                )}
-                {mini && !placedHero && (
-                  <div className="text-[6px] text-slate-700 font-bold">{node.requiredClass.charAt(0)}</div>
-                )}
-              </button>
+              </div>
             );
           })}
         </div>

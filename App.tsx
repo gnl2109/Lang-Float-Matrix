@@ -13,6 +13,7 @@ const App: React.FC = () => {
   // --- States ---
   const [ownedHeroIds, setOwnedHeroIds] = useState<Set<number>>(new Set());
   const [allPlacements, setAllPlacements] = useState<Record<string, number>>({});
+  const [pinnedKeys, setPinnedKeys] = useState<Set<string>>(new Set());
   const [viewMode, setViewMode] = useState<'single' | 'batch' | 'database'>('batch');
   const [activePuzzle, setActivePuzzle] = useState<PuzzleType>(PuzzleType.CITY_HALL);
   const [searchTerm, setSearchTerm] = useState('');
@@ -38,6 +39,7 @@ const App: React.FC = () => {
         const parsed = JSON.parse(saved);
         if (parsed.ownedHeroIds) setOwnedHeroIds(new Set(parsed.ownedHeroIds));
         if (parsed.allPlacements) setAllPlacements(parsed.allPlacements);
+        if (parsed.pinnedKeys) setPinnedKeys(new Set(parsed.pinnedKeys));
         if (parsed.heroActiveClasses) setHeroActiveClasses(parsed.heroActiveClasses);
       } catch (e) {
         console.error("Failed to load state", e);
@@ -57,10 +59,11 @@ const App: React.FC = () => {
     const stateToSave = {
       ownedHeroIds: Array.from(ownedHeroIds),
       allPlacements,
+      pinnedKeys: Array.from(pinnedKeys),
       heroActiveClasses
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(stateToSave));
-  }, [ownedHeroIds, allPlacements, heroActiveClasses, isInitialized]);
+  }, [ownedHeroIds, allPlacements, pinnedKeys, heroActiveClasses, isInitialized]);
 
   // Notifications
   useEffect(() => {
@@ -76,10 +79,11 @@ const App: React.FC = () => {
     const state = {
       ownedHeroIds: Array.from(ownedHeroIds),
       allPlacements,
+      pinnedKeys: Array.from(pinnedKeys),
       heroActiveClasses
     };
     return JSON.stringify(state);
-  }, [ownedHeroIds, allPlacements, heroActiveClasses, showExportModal]);
+  }, [ownedHeroIds, allPlacements, pinnedKeys, heroActiveClasses, showExportModal]);
 
   const handleCopyExport = () => {
     navigator.clipboard.writeText(exportDataJson).then(() => {
@@ -94,6 +98,7 @@ const App: React.FC = () => {
       const parsed = JSON.parse(importValue);
       if (parsed.ownedHeroIds) setOwnedHeroIds(new Set(parsed.ownedHeroIds));
       if (parsed.allPlacements) setAllPlacements(parsed.allPlacements);
+      if (parsed.pinnedKeys) setPinnedKeys(new Set(parsed.pinnedKeys));
       if (parsed.heroActiveClasses) setHeroActiveClasses(parsed.heroActiveClasses);
       setShowImportModal(false);
       setImportValue('');
@@ -106,6 +111,7 @@ const App: React.FC = () => {
   const executeFullReset = () => {
     setOwnedHeroIds(new Set());
     setAllPlacements({});
+    setPinnedKeys(new Set());
     const initialClasses: Record<number, HeroClass[]> = {};
     HERO_DATABASE.forEach(h => {
       initialClasses[h.id] = [...h.classes];
@@ -120,10 +126,15 @@ const App: React.FC = () => {
     const next = new Set(ownedHeroIds);
     if (next.has(id)) {
       const nextPlacements = { ...allPlacements };
+      const nextPinned = new Set(pinnedKeys);
       Object.keys(nextPlacements).forEach(key => {
-        if (nextPlacements[key] === id) delete nextPlacements[key];
+        if (nextPlacements[key] === id) {
+          delete nextPlacements[key];
+          nextPinned.delete(key);
+        }
       });
       setAllPlacements(nextPlacements);
+      setPinnedKeys(nextPinned);
       next.delete(id);
     } else {
       next.add(id);
@@ -142,6 +153,7 @@ const App: React.FC = () => {
       const current = prev[heroId] || [];
       const next = current.includes(hc) ? current.filter(c => c !== hc) : [...current, hc];
       const nextPlacements = { ...allPlacements };
+      const nextPinned = new Set(pinnedKeys);
       let changed = false;
       Object.entries(nextPlacements).forEach(([key, placedId]) => {
         if (placedId === heroId) {
@@ -150,11 +162,15 @@ const App: React.FC = () => {
           const node = puzzle?.nodes.find(n => n.id === nodeId);
           if (node && !next.includes(node.requiredClass)) {
             delete nextPlacements[key];
+            nextPinned.delete(key);
             changed = true;
           }
         }
       });
-      if (changed) setAllPlacements(nextPlacements);
+      if (changed) {
+        setAllPlacements(nextPlacements);
+        setPinnedKeys(nextPinned);
+      }
       return { ...prev, [heroId]: next };
     });
   };
@@ -185,10 +201,23 @@ const App: React.FC = () => {
   const handleSocketClick = (nodeId: string) => {
     const key = `${activePuzzle}_${nodeId}`;
     const nextPlacements = { ...allPlacements };
+    const nextPinned = new Set(pinnedKeys);
     if (nextPlacements[key]) {
       delete nextPlacements[key];
+      nextPinned.delete(key);
       setAllPlacements(nextPlacements);
+      setPinnedKeys(nextPinned);
     }
+  };
+
+  const handleTogglePin = (nodeId: string) => {
+    const key = `${activePuzzle}_${nodeId}`;
+    if (!allPlacements[key]) return;
+    
+    const next = new Set(pinnedKeys);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    setPinnedKeys(next);
   };
 
   const handleDrop = (nodeId: string, heroId: number) => {
@@ -202,23 +231,48 @@ const App: React.FC = () => {
       return;
     }
     const key = `${activePuzzle}_${nodeId}`;
+    
+    // 타겟 슬롯이 고정되어 있다면 변경 불가 (수동 배치 시에는 고정을 풀고 배치하는 것이 일반적이나 안전을 위해)
+    if (pinnedKeys.has(key)) {
+       setNotification("고정된 슬롯은 변경할 수 없습니다. 먼저 고정을 해제하세요.");
+       return;
+    }
+
     const nextPlacements = { ...allPlacements };
+    const nextPinned = new Set(pinnedKeys);
+    
+    // 이미 배치된 동일 영웅의 기존 위치와 고정 상태 제거
     Object.keys(nextPlacements).forEach(k => {
-      if (nextPlacements[k] === heroId) delete nextPlacements[k];
+      if (nextPlacements[k] === heroId) {
+        delete nextPlacements[k];
+        nextPinned.delete(k);
+      }
     });
+
     nextPlacements[key] = heroId;
     setAllPlacements(nextPlacements);
+    setPinnedKeys(nextPinned);
   };
 
   const handleAutoOptimize = () => {
     if (ownedHeroIds.size === 0) return;
     setIsOptimizing(true);
+    
     setTimeout(() => {
       const ownedHeroes = HERO_DATABASE.filter(h => ownedHeroIds.has(h.id));
-      const optimized = optimizeAllPlacements(ownedHeroes, PUZZLE_DEFINITIONS, heroActiveClasses);
+      
+      // 고정된 배치 정보만 추출
+      const fixedPlacements: Record<string, number> = {};
+      pinnedKeys.forEach(key => {
+        if (allPlacements[key]) {
+          fixedPlacements[key] = allPlacements[key];
+        }
+      });
+
+      const optimized = optimizeAllPlacements(ownedHeroes, PUZZLE_DEFINITIONS, heroActiveClasses, fixedPlacements);
       setAllPlacements(optimized);
       setIsOptimizing(false);
-      setNotification("최적 배치가 완료되었습니다.");
+      setNotification("고정된 슬롯을 제외한 최적 배치가 완료되었습니다.");
     }, 100);
   };
 
@@ -462,7 +516,7 @@ const App: React.FC = () => {
               <div className="mb-8 flex justify-between items-end">
                 <div>
                   <h2 className="text-3xl font-black text-white">배치 대시보드</h2>
-                  <p className="text-slate-500 text-sm mt-1">통합 최적화 알고리즘이 적용된 전체 배치도입니다.</p>
+                  <p className="text-slate-500 text-sm mt-1">통합 최적화 알고리즘이 적용된 전체 배치도입니다. (고정된 슬롯은 변경되지 않습니다.)</p>
                 </div>
                 <div className="text-right">
                   <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest block mb-1">총 합계 점수</span>
@@ -486,7 +540,16 @@ const App: React.FC = () => {
                         </div>
                       </div>
                       <div className="flex-1 relative">
-                        <PuzzleBoard definition={p} placements={placements} onSocketClick={() => {}} onDrop={() => {}} selectedHeroId={null} mini />
+                        <PuzzleBoard 
+                          definition={p} 
+                          placements={placements} 
+                          pinnedKeys={pinnedKeys}
+                          onSocketClick={() => {}} 
+                          onTogglePin={() => {}}
+                          onDrop={() => {}} 
+                          selectedHeroId={null} 
+                          mini 
+                        />
                       </div>
                     </div>
                   );
@@ -509,7 +572,16 @@ const App: React.FC = () => {
                   <span className="text-4xl font-black text-amber-500 tabular-nums">{calculateTotalScore(activePuzzleDef, currentPuzzlePlacements)}</span>
                 </div>
               </div>
-              <PuzzleBoard definition={activePuzzleDef} placements={currentPuzzlePlacements} onSocketClick={handleSocketClick} onDrop={handleDrop} selectedHeroId={null} />
+              <PuzzleBoard 
+                definition={activePuzzleDef} 
+                placements={currentPuzzlePlacements} 
+                pinnedKeys={pinnedKeys}
+                onSocketClick={handleSocketClick} 
+                onTogglePin={handleTogglePin}
+                onDrop={handleDrop} 
+                selectedHeroId={null} 
+              />
+              <p className="mt-8 text-slate-600 text-[10px] font-black uppercase tracking-widest text-center">배치된 영웅을 클릭하면 해제됩니다. <br/> 우측 상단 핀 아이콘을 누르면 자동 최적화 시 고정됩니다.</p>
             </div>
           )}
         </div>

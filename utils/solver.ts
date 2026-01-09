@@ -46,11 +46,13 @@ const calculateGlobalScore = (
 
 /**
  * 최적화 알고리즘: Greedy Seed + Iterative Swap
+ * fixedPlacements가 제공되면 해당 슬롯은 최적화 대상에서 제외됩니다.
  */
 export const optimizeAllPlacements = (
   ownedHeroes: Hero[],
   puzzles: PuzzleDefinition[],
-  activeClassesMap: Record<number, HeroClass[]>
+  activeClassesMap: Record<number, HeroClass[]>,
+  fixedPlacements: Record<string, number> = {}
 ): Record<string, number> => {
   if (ownedHeroes.length === 0) return {};
 
@@ -72,10 +74,24 @@ export const optimizeAllPlacements = (
   });
 
   const currentPlacements = new Map<string, Hero>();
-  const availableHeroes = [...ownedHeroes];
-  const sortedSlots = [...allSlots].sort((a, b) => b.edges.length - a.edges.length);
+  
+  // 1. 고정된 배치 적용 및 가용 영웅 풀에서 제거
+  const fixedHeroIds = new Set(Object.values(fixedPlacements));
+  const availableHeroes = ownedHeroes.filter(h => !fixedHeroIds.has(h.id));
+  
+  Object.entries(fixedPlacements).forEach(([key, heroId]) => {
+    const hero = ownedHeroes.find(h => h.id === heroId);
+    if (hero) {
+      currentPlacements.set(key, hero);
+    }
+  });
 
-  sortedSlots.forEach(slot => {
+  // 2. 고정되지 않은 슬롯 리스트 추출
+  const targetSlots = allSlots.filter(s => !fixedPlacements[s.key]);
+  const sortedTargetSlots = [...targetSlots].sort((a, b) => b.edges.length - a.edges.length);
+
+  // 3. Greedy Placement (고정되지 않은 슬롯만 대상으로)
+  sortedTargetSlots.forEach(slot => {
     let bestHeroIdx = -1;
     let maxGain = -1;
 
@@ -94,7 +110,6 @@ export const optimizeAllPlacements = (
         maxGain = gain;
         bestHeroIdx = i;
       } else if (gain === maxGain && maxGain !== -1) {
-        // 동률일 경우 진영이 많은 영웅을 아끼기 위해 클래스가 적은 영웅 우선 사용
         if (h.classes.length < availableHeroes[bestHeroIdx].classes.length) {
           bestHeroIdx = i;
         }
@@ -107,17 +122,18 @@ export const optimizeAllPlacements = (
     }
   });
 
+  // 4. Iterative Optimization (고정되지 않은 슬롯만 대상으로 스왑)
   let improved = true;
   let iterations = 0;
   while (improved && iterations < 30) {
     improved = false;
     iterations++;
 
-    // 스왑 최적화
-    for (let i = 0; i < allSlots.length; i++) {
-      for (let j = i + 1; j < allSlots.length; j++) {
-        const slotA = allSlots[i];
-        const slotB = allSlots[j];
+    // Target 슬롯들 간의 스왑 최적화
+    for (let i = 0; i < targetSlots.length; i++) {
+      for (let j = i + 1; j < targetSlots.length; j++) {
+        const slotA = targetSlots[i];
+        const slotB = targetSlots[j];
         const heroA = currentPlacements.get(slotA.key);
         const heroB = currentPlacements.get(slotB.key);
 
@@ -141,9 +157,9 @@ export const optimizeAllPlacements = (
       }
     }
 
-    // 대기 영웅 교체 최적화
-    for (let i = 0; i < allSlots.length; i++) {
-      const slot = allSlots[i];
+    // 대기 영웅 교체 최적화 (Target 슬롯만)
+    for (let i = 0; i < targetSlots.length; i++) {
+      const slot = targetSlots[i];
       const currentHero = currentPlacements.get(slot.key);
 
       for (let j = 0; j < availableHeroes.length; j++) {
