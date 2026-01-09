@@ -7,7 +7,10 @@ import PuzzleBoard from './components/PuzzleBoard';
 import { calculateTotalScore } from './utils/scoring';
 import { optimizeAllPlacements } from './utils/solver';
 
+const STORAGE_KEY = 'lfco_app_state_v1';
+
 const App: React.FC = () => {
+  // --- States ---
   const [ownedHeroIds, setOwnedHeroIds] = useState<Set<number>>(new Set());
   const [allPlacements, setAllPlacements] = useState<Record<string, number>>({});
   const [viewMode, setViewMode] = useState<'single' | 'batch' | 'database'>('batch');
@@ -16,15 +19,102 @@ const App: React.FC = () => {
   const [selectedFaction, setSelectedFaction] = useState<Faction | 'ALL'>('ALL');
   const [selectedClassesFilter, setSelectedClassesFilter] = useState<Set<HeroClass>>(new Set());
   const [isOptimizing, setIsOptimizing] = useState(false);
+  const [heroActiveClasses, setHeroActiveClasses] = useState<Record<number, HeroClass[]>>({});
+  const [isInitialized, setIsInitialized] = useState(false);
+  
+  // Custom UI Modals
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importValue, setImportValue] = useState('');
+  const [notification, setNotification] = useState<string | null>(null);
 
-  // 영웅별 활성화된 클래스 상태
-  const [heroActiveClasses, setHeroActiveClasses] = useState<Record<number, HeroClass[]>>(() => {
-    const initial: Record<number, HeroClass[]> = {};
-    HERO_DATABASE.forEach(h => {
-      initial[h.id] = [...h.classes];
+  // --- Persistence Logic ---
+  
+  useEffect(() => {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (parsed.ownedHeroIds) setOwnedHeroIds(new Set(parsed.ownedHeroIds));
+        if (parsed.allPlacements) setAllPlacements(parsed.allPlacements);
+        if (parsed.heroActiveClasses) setHeroActiveClasses(parsed.heroActiveClasses);
+      } catch (e) {
+        console.error("Failed to load state", e);
+      }
+    } else {
+      const initialClasses: Record<number, HeroClass[]> = {};
+      HERO_DATABASE.forEach(h => {
+        initialClasses[h.id] = [...h.classes];
+      });
+      setHeroActiveClasses(initialClasses);
+    }
+    setIsInitialized(true);
+  }, []);
+
+  useEffect(() => {
+    if (!isInitialized) return;
+    const stateToSave = {
+      ownedHeroIds: Array.from(ownedHeroIds),
+      allPlacements,
+      heroActiveClasses
+    };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(stateToSave));
+  }, [ownedHeroIds, allPlacements, heroActiveClasses, isInitialized]);
+
+  // Notifications
+  useEffect(() => {
+    if (notification) {
+      const timer = setTimeout(() => setNotification(null), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [notification]);
+
+  // --- Handlers ---
+
+  const exportDataJson = useMemo(() => {
+    const state = {
+      ownedHeroIds: Array.from(ownedHeroIds),
+      allPlacements,
+      heroActiveClasses
+    };
+    return JSON.stringify(state);
+  }, [ownedHeroIds, allPlacements, heroActiveClasses, showExportModal]);
+
+  const handleCopyExport = () => {
+    navigator.clipboard.writeText(exportDataJson).then(() => {
+      setNotification("클립보드에 복사되었습니다.");
+    }).catch(() => {
+      setNotification("자동 복사 실패. 텍스트를 직접 복사하세요.");
     });
-    return initial;
-  });
+  };
+
+  const handleExecuteImport = () => {
+    try {
+      const parsed = JSON.parse(importValue);
+      if (parsed.ownedHeroIds) setOwnedHeroIds(new Set(parsed.ownedHeroIds));
+      if (parsed.allPlacements) setAllPlacements(parsed.allPlacements);
+      if (parsed.heroActiveClasses) setHeroActiveClasses(parsed.heroActiveClasses);
+      setShowImportModal(false);
+      setImportValue('');
+      setNotification("데이터를 성공적으로 불러왔습니다.");
+    } catch (e) {
+      setNotification("올바르지 않은 데이터 형식입니다.");
+    }
+  };
+
+  const executeFullReset = () => {
+    setOwnedHeroIds(new Set());
+    setAllPlacements({});
+    const initialClasses: Record<number, HeroClass[]> = {};
+    HERO_DATABASE.forEach(h => {
+      initialClasses[h.id] = [...h.classes];
+    });
+    setHeroActiveClasses(initialClasses);
+    localStorage.removeItem(STORAGE_KEY);
+    setShowResetConfirm(false);
+    setNotification("모든 데이터가 초기화되었습니다.");
+  };
 
   const toggleHero = (id: number) => {
     const next = new Set(ownedHeroIds);
@@ -37,6 +127,12 @@ const App: React.FC = () => {
       next.delete(id);
     } else {
       next.add(id);
+      if (!heroActiveClasses[id]) {
+        const hero = HERO_DATABASE.find(h => h.id === id);
+        if (hero) {
+          setHeroActiveClasses(prev => ({ ...prev, [id]: [...hero.classes] }));
+        }
+      }
     }
     setOwnedHeroIds(next);
   };
@@ -44,10 +140,7 @@ const App: React.FC = () => {
   const toggleHeroClass = (heroId: number, hc: HeroClass) => {
     setHeroActiveClasses(prev => {
       const current = prev[heroId] || [];
-      const next = current.includes(hc) 
-        ? current.filter(c => c !== hc) 
-        : [...current, hc];
-      
+      const next = current.includes(hc) ? current.filter(c => c !== hc) : [...current, hc];
       const nextPlacements = { ...allPlacements };
       let changed = false;
       Object.entries(nextPlacements).forEach(([key, placedId]) => {
@@ -62,7 +155,6 @@ const App: React.FC = () => {
         }
       });
       if (changed) setAllPlacements(nextPlacements);
-
       return { ...prev, [heroId]: next };
     });
   };
@@ -102,16 +194,13 @@ const App: React.FC = () => {
   const handleDrop = (nodeId: string, heroId: number) => {
     const hero = HERO_DATABASE.find(h => h.id === heroId);
     if (!hero) return;
-
     const puzzle = PUZZLE_DEFINITIONS.find(p => p.type === activePuzzle);
     const node = puzzle?.nodes.find(n => n.id === nodeId);
     const activeClasses = heroActiveClasses[heroId] || [];
-
     if (node && !activeClasses.includes(node.requiredClass)) {
-      alert(`이 슬롯은 [${node.requiredClass}] 클래스가 활성화된 영웅만 배치 가능합니다.\n[${hero.name}]은(는) 현재 해당 클래스가 비활성 상태입니다.`);
+      setNotification(`[${node.requiredClass}] 활성화 필요`);
       return;
     }
-
     const key = `${activePuzzle}_${nodeId}`;
     const nextPlacements = { ...allPlacements };
     Object.keys(nextPlacements).forEach(k => {
@@ -124,16 +213,15 @@ const App: React.FC = () => {
   const handleAutoOptimize = () => {
     if (ownedHeroIds.size === 0) return;
     setIsOptimizing(true);
-    // 복잡한 연산을 위해 setTimeout으로 UI 스레드 분리
     setTimeout(() => {
       const ownedHeroes = HERO_DATABASE.filter(h => ownedHeroIds.has(h.id));
       const optimized = optimizeAllPlacements(ownedHeroes, PUZZLE_DEFINITIONS, heroActiveClasses);
       setAllPlacements(optimized);
       setIsOptimizing(false);
+      setNotification("최적 배치가 완료되었습니다.");
     }, 100);
   };
 
-  // 사이드바용 필터링 (전체 영웅 대상)
   const sidebarFilteredHeroes = useMemo(() => {
     const term = searchTerm.toLowerCase();
     return HERO_DATABASE.filter(h => {
@@ -143,7 +231,6 @@ const App: React.FC = () => {
     });
   }, [searchTerm, selectedFaction]);
 
-  // 도감(관리) 뷰용 필터링 (선택된 영웅들 중에서만)
   const managedHeroes = useMemo(() => {
     return HERO_DATABASE.filter(h => {
       if (!ownedHeroIds.has(h.id)) return false;
@@ -168,8 +255,73 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-[#020617] text-slate-200 flex flex-col md:flex-row h-screen overflow-hidden">
+      
+      {/* --- NOTIFICATION TOAST --- */}
+      {notification && (
+        <div className="fixed top-8 left-1/2 -translate-x-1/2 z-[200] bg-amber-500 text-slate-950 px-6 py-3 rounded-2xl font-black text-xs shadow-2xl shadow-amber-500/20 animate-in slide-in-from-top duration-300">
+          {notification}
+        </div>
+      )}
+
+      {/* --- MODALS --- */}
+      
+      {/* Reset Modal */}
+      {showResetConfirm && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-[100] flex items-center justify-center p-6" onClick={() => setShowResetConfirm(false)}>
+          <div className="bg-slate-900 border border-slate-800 p-8 rounded-[32px] max-w-sm w-full shadow-2xl animate-in zoom-in duration-200" onClick={e => e.stopPropagation()}>
+            <h3 className="text-xl font-black text-white mb-2">데이터 초기화</h3>
+            <p className="text-slate-400 text-sm mb-8 leading-relaxed">모든 보유 영웅 및 배치 데이터가 삭제됩니다.</p>
+            <div className="grid grid-cols-2 gap-3">
+              <button onClick={() => setShowResetConfirm(false)} className="py-3 px-4 rounded-xl bg-slate-800 text-slate-300 font-bold hover:bg-slate-700">취소</button>
+              <button onClick={executeFullReset} className="py-3 px-4 rounded-xl bg-red-600 text-white font-bold hover:bg-red-500">삭제</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Export Modal */}
+      {showExportModal && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-[100] flex items-center justify-center p-6" onClick={() => setShowExportModal(false)}>
+          <div className="bg-slate-900 border border-slate-800 p-8 rounded-[32px] max-w-xl w-full shadow-2xl animate-in zoom-in duration-200" onClick={e => e.stopPropagation()}>
+            <h3 className="text-xl font-black text-white mb-2">데이터 내보내기</h3>
+            <p className="text-slate-400 text-sm mb-4 leading-relaxed">아래 JSON 텍스트를 복사하여 보관하세요.</p>
+            <textarea 
+              readOnly 
+              value={exportDataJson}
+              className="w-full h-48 bg-slate-950 border border-slate-800 rounded-2xl p-4 text-[10px] font-mono text-slate-500 mb-6 resize-none focus:ring-1 ring-amber-500 outline-none"
+              onClick={(e) => (e.target as HTMLTextAreaElement).select()}
+            />
+            <div className="grid grid-cols-2 gap-3">
+              <button onClick={() => setShowExportModal(false)} className="py-3 px-4 rounded-xl bg-slate-800 text-slate-300 font-bold hover:bg-slate-700">닫기</button>
+              <button onClick={handleCopyExport} className="py-3 px-4 rounded-xl bg-amber-500 text-slate-950 font-bold hover:bg-amber-400">클립보드 복사</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Import Modal */}
+      {showImportModal && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-[100] flex items-center justify-center p-6" onClick={() => setShowImportModal(false)}>
+          <div className="bg-slate-900 border border-slate-800 p-8 rounded-[32px] max-w-xl w-full shadow-2xl animate-in zoom-in duration-200" onClick={e => e.stopPropagation()}>
+            <h3 className="text-xl font-black text-white mb-2">데이터 불러오기</h3>
+            <p className="text-slate-400 text-sm mb-4 leading-relaxed">저장해둔 JSON 텍스트를 붙여넣으세요.</p>
+            <textarea 
+              placeholder='{"ownedHeroIds": [...] ...}'
+              value={importValue}
+              onChange={(e) => setImportValue(e.target.value)}
+              className="w-full h-48 bg-slate-950 border border-slate-800 rounded-2xl p-4 text-[10px] font-mono text-slate-200 mb-6 resize-none focus:ring-1 ring-amber-500 outline-none"
+            />
+            <div className="grid grid-cols-2 gap-3">
+              <button onClick={() => setShowImportModal(false)} className="py-3 px-4 rounded-xl bg-slate-800 text-slate-300 font-bold hover:bg-slate-700">취소</button>
+              <button onClick={handleExecuteImport} className="py-3 px-4 rounded-xl bg-amber-500 text-slate-950 font-bold hover:bg-amber-400">불러오기</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- ASIDE --- */}
       <aside className="w-full md:w-80 bg-slate-900 border-r border-slate-800 flex flex-col shadow-2xl z-20">
-        <div className="p-6 border-b border-slate-800 bg-slate-900/50 backdrop-blur-md">
+        <div className="p-6 border-b border-slate-800">
           <h2 className="text-xl font-black text-white flex items-center gap-2">
             <span className="w-2 h-6 bg-amber-500 rounded-full" />
             보유 영웅 Pool
@@ -203,16 +355,31 @@ const App: React.FC = () => {
           </div>
         </div>
         
-        <div className="p-4 bg-slate-950 border-t border-slate-800">
+        <div className="p-4 bg-slate-950 border-t border-slate-800 space-y-1">
+          <div className="grid grid-cols-2 gap-2 mb-2">
+            <button 
+              onClick={() => setShowExportModal(true)}
+              className="py-2 text-[9px] font-black bg-slate-900 text-slate-400 hover:text-amber-400 hover:bg-slate-800 rounded-lg transition-all border border-slate-800 uppercase tracking-wider"
+            >
+              데이터 내보내기
+            </button>
+            <button 
+              onClick={() => setShowImportModal(true)}
+              className="py-2 text-[9px] font-black bg-slate-900 text-slate-400 hover:text-amber-400 hover:bg-slate-800 rounded-lg transition-all border border-slate-800 uppercase tracking-wider"
+            >
+              데이터 불러오기
+            </button>
+          </div>
           <button 
-            onClick={() => { setOwnedHeroIds(new Set()); setAllPlacements({}); }}
-            className="w-full py-2.5 text-[10px] font-black text-slate-500 hover:text-slate-300 transition-colors uppercase tracking-[0.2em]"
+            onClick={() => setShowResetConfirm(true)}
+            className="w-full py-2.5 text-[10px] font-black text-slate-600 hover:text-red-400 transition-colors uppercase tracking-[0.2em]"
           >
             전체 초기화
           </button>
         </div>
       </aside>
 
+      {/* --- MAIN --- */}
       <main className="flex-1 flex flex-col bg-[#020617] relative overflow-hidden">
         <header className="px-8 py-6 flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-900/50 bg-slate-950/30 backdrop-blur-sm z-10">
           <div>
@@ -275,21 +442,19 @@ const App: React.FC = () => {
                   <p className="text-slate-600 text-sm mt-2">왼쪽 사이드바에서 보유한 영웅을 클릭하여 추가해 주세요.</p>
                 </div>
               ) : (
-                <>
-                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-                    {managedHeroes.map(hero => (
-                      <HeroCard 
-                        key={hero.id}
-                        hero={hero} 
-                        isSelected={ownedHeroIds.has(hero.id)}
-                        isPlaced={Object.values(allPlacements).includes(hero.id)}
-                        onClick={() => toggleHero(hero.id)}
-                        onToggleClass={(hc) => toggleHeroClass(hero.id, hc)}
-                        activeClasses={heroActiveClasses[hero.id] || []}
-                      />
-                    ))}
-                  </div>
-                </>
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+                  {managedHeroes.map(hero => (
+                    <HeroCard 
+                      key={hero.id}
+                      hero={hero} 
+                      isSelected={ownedHeroIds.has(hero.id)}
+                      isPlaced={Object.values(allPlacements).includes(hero.id)}
+                      onClick={() => toggleHero(hero.id)}
+                      onToggleClass={(hc) => toggleHeroClass(hero.id, hc)}
+                      activeClasses={heroActiveClasses[hero.id] || []}
+                    />
+                  ))}
+                </div>
               )}
             </div>
           ) : viewMode === 'batch' ? (
@@ -353,7 +518,7 @@ const App: React.FC = () => {
            <div className="flex items-center gap-4">
              <span className="flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" /> SYSTEM READY</span>
              <span className="text-slate-800">|</span>
-             <span>ITERATIVE LOCAL SEARCH OPTIMIZER ACTIVE</span>
+             <span>PERSISTENCE LAYER ACTIVE</span>
            </div>
            <div>© 2024 LANGRISSER FLOATING CITY TACTICS</div>
         </footer>
